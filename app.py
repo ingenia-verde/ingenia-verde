@@ -5,15 +5,14 @@ import io
 import datetime
 import json
 
-# ReportLab para PDF
+from googleapiclient.discovery import build
+from google.oauth2.service_account import Credentials
+
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 
-# -----------------------------------------------------------------------------
-# CONFIGURACIÓN DE PÁGINA
-# -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Ingenia Verde Pro - Plataforma Integral",
     page_icon="🌿",
@@ -21,42 +20,148 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# GESTIÓN DE CLAVE API (SECRETS O MANUAL)
+# GESTIÓN DE CREDENCIALES Y APIS
 # -----------------------------------------------------------------------------
-api_key = None
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-else:
-    api_key = st.sidebar.text_input("🔑 Clave API Gemini (Admin)", type="password")
+api_key = st.secrets.get("GEMINI_API_KEY") if "GEMINI_API_KEY" in st.secrets else st.sidebar.text_input("🔑 Clave API Gemini (Admin)", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
 
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
+
+def obtener_servicios_google():
+    try:
+        if "gcp_service_account" in st.secrets:
+            creds_dict = dict(st.secrets["gcp_service_account"])
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            sheets_service = build('sheets', 'v4', credentials=creds)
+            drive_service = build('drive', 'v3', credentials=creds)
+            return sheets_service, drive_service
+    except Exception:
+        return None, None
+    return None, None
+
+sheets_service, drive_service = obtener_servicios_google()
+
 # -----------------------------------------------------------------------------
-# BARRA LATERAL: INICIO DE SESIÓN Y ACCESO OCULTO
+# FUNCIONES DE GOOGLE DRIVE Y SHEETS ROBUSTAS
+# -----------------------------------------------------------------------------
+def buscar_o_crear_sheet_docente(correo_docente):
+    if not drive_service or not sheets_service:
+        return None
+    
+    clean_email = correo_docente.strip()
+    query = f"name = 'Ingenia_Verde_Notas_{clean_email}' and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
+    try:
+        results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        files = results.get('files', [])
+        
+        if files:
+            return files[0]['id']
+        else:
+            # Crear Spreadsheet con pestañas precargadas: Silabo y Alumnos
+            spreadsheet = {
+                'properties': {'title': f'Ingenia_Verde_Notas_{clean_email}'},
+                'sheets': [
+                    {'properties': {'title': 'Silabo'}},
+                    {'properties': {'title': 'Alumnos'}}
+                ]
+            }
+            sheet = sheets_service.spreadsheets().create(body=spreadsheet, fields='spreadsheetId').execute()
+            return sheet.get('spreadsheetId')
+    except Exception:
+        return None
+
+def cargar_datos_docente_drive(sheet_id):
+    if not sheets_service or not sheet_id:
+        return None, None
+    
+    df_silabo, df_alumnos = None, None
+    try:
+        # Intentar leer Sílabo
+        res_silabo = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range="Silabo!A1:C10"
+        ).execute()
+        rows_silabo = res_silabo.get('values', [])
+        if len(rows_silabo) > 1:
+            df_silabo = pd.DataFrame(rows_silabo[1:], columns=rows_silabo[0])
+            df_silabo["Porcentaje (%)"] = pd.to_numeric(df_silabo["Porcentaje (%)"], errors='coerce')
+            df_silabo["Cantidad de Evaluaciones"] = pd.to_numeric(df_silabo["Cantidad de Evaluaciones"], errors='coerce')
+
+        # Intentar leer Alumnos
+        res_alumnos = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range="Alumnos!A1:Z100"
+        ).execute()
+        rows_alumnos = res_alumnos.get('values', [])
+        if len(rows_alumnos) > 1:
+            df_alumnos = pd.DataFrame(rows_alumnos[1:], columns=rows_alumnos[0])
+
+    except Exception:
+        pass
+        
+    return df_silabo, df_alumnos
+
+def guardar_datos_docente_drive(sheet_id, df_silabo=None, df_alumnos=None):
+    if not sheets_service or not sheet_id:
+        return False
+    try:
+        if df_silabo is not None:
+            body_silabo = {'values': [df_silabo.columns.tolist()] + df_silabo.values.tolist()}
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range="Silabo!A1",
+                valueInputOption="USER_ENTERED", body=body_silabo
+            ).execute()
+            
+        if df_alumnos is not None:
+            body_alumnos = {'values': [df_alumnos.columns.tolist()] + df_alumnos.values.tolist()}
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range="Alumnos!A1",
+                valueInputOption="USER_ENTERED", body=body_alumnos
+            ).execute()
+        return True
+    except Exception:
+        return False
+
+# -----------------------------------------------------------------------------
+# BARRA LATERAL
 # -----------------------------------------------------------------------------
 st.sidebar.title("🌿 Ingenia Verde Pro")
 st.sidebar.caption("Plataforma de Digitalización y Servicios Académicos")
 st.sidebar.markdown("---")
 
-st.sidebar.subheader("🔐 Iniciar Sesión")
+st.sidebar.subheader("🔐 Iniciar Sesión Docente")
 correo_usuario = st.sidebar.text_input(
     "📧 Correo Electrónico:", 
     value=st.session_state.get("user_email", ""),
     placeholder="usuario@universidad.edu.pe"
-)
+).strip()
 
 if correo_usuario:
     st.session_state["user_email"] = correo_usuario
     st.sidebar.success(f"Sesión activa: {correo_usuario}")
+    
+    if "drive_synced" not in st.session_state or st.session_state.get("synced_email") != correo_usuario:
+        sheet_id = buscar_o_crear_sheet_docente(correo_usuario)
+        if sheet_id:
+            st.session_state["sheet_id"] = sheet_id
+            df_silabo, df_alumnos = cargar_datos_docente_drive(sheet_id)
+            if df_silabo is not None:
+                st.session_state["config_eval"] = {"curso": "Curso Sincronizado", "estructura": df_silabo}
+            if df_alumnos is not None:
+                st.session_state["alumnos_df"] = df_alumnos
+            if df_silabo is not None or df_alumnos is not None:
+                st.sidebar.info("🔄 Datos recuperados desde Google Drive.")
+        st.session_state["drive_synced"] = True
+        st.session_state["synced_email"] = correo_usuario
 else:
     st.sidebar.info("Ingresa tu correo para registrar tus operaciones.")
 
 st.sidebar.markdown("---")
 
-# PIN SECRETO PARA ACTIVAR MODO ESTUDIANTE / SERVICIOS ACADÉMICOS
 PIN_SECRETO = "INGENIA2026"
-
 with st.sidebar.expander("⚙️ Opciones Avanzadas / Rol", expanded=False):
     pin_ingresado = st.text_input("Código de Acceso Especial", type="password")
 
@@ -145,7 +250,7 @@ def modulo_pago_suscripcion_yape():
             return False
 
 # =============================================================================
-# MODO 1: MAESTRO / DOCENTE (VISTA PÚBLICA PRINCIPAL)
+# MODO 1: MAESTRO / DOCENTE
 # =============================================================================
 if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
     st.title("🎓 Ingenia Verde Pro - Gestión Docente")
@@ -161,12 +266,16 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
         st.header("1. Reglas de Evaluación de la Asignatura")
         nombre_curso = st.text_input("Nombre de la Asignatura", "Matemática I")
         
-        datos_default = {
-            "Rubro": ["Prácticas (PR)", "Trabajos Encargados (TE)", "Examen Parcial (EP)", "Examen Final (EF)"],
-            "Porcentaje (%)": [30, 20, 25, 25],
-            "Cantidad de Evaluaciones": [4, 3, 1, 1]
-        }
-        df_config = pd.DataFrame(datos_default)
+        if "config_eval" in st.session_state:
+            df_config = st.session_state["config_eval"]["estructura"]
+        else:
+            datos_default = {
+                "Rubro": ["Prácticas (PR)", "Trabajos Encargados (TE)", "Examen Parcial (EP)", "Examen Final (EF)"],
+                "Porcentaje (%)": [30, 20, 25, 25],
+                "Cantidad de Evaluaciones": [4, 3, 1, 1]
+            }
+            df_config = pd.DataFrame(datos_default)
+            
         df_editado = st.data_editor(df_config, num_rows="dynamic", use_container_width=True)
         
         suma_porcentaje = df_editado["Porcentaje (%)"].sum()
@@ -174,24 +283,35 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
             st.success(f"✅ Total del porcentaje: {suma_porcentaje}% (Válido)")
             if st.button("💾 Guardar Configuración de Evaluaciones"):
                 st.session_state["config_eval"] = {"curso": nombre_curso, "estructura": df_editado}
-                st.toast("Configuración guardada", icon="🎉")
+                sheet_id = st.session_state.get("sheet_id")
+                if sheet_id:
+                    guardar_datos_docente_drive(sheet_id, df_silabo=df_editado)
+                st.toast("Configuración guardada y respaldada en Google Drive", icon="🎉")
         else:
             st.error(f"⚠️ La suma debe ser exactamente 100%. Actual: {suma_porcentaje}%")
 
     with tab2:
         st.header("2. Lista de Estudiantes Matriculados")
-        archivo_matricula = st.file_uploader("Cargar lista oficial (Excel o CSV)", type=["xlsx", "csv"], key="docente_mat")
+        
+        if "alumnos_df" in st.session_state:
+            st.subheader("📋 Lista Actual Cargada / Sincronizada:")
+            st.dataframe(st.session_state["alumnos_df"], use_container_width=True)
+
+        archivo_matricula = st.file_uploader("Cargar / Reemplazar lista oficial (Excel o CSV)", type=["xlsx", "csv"], key="docente_mat")
         if archivo_matricula:
             df_alumnos = pd.read_csv(archivo_matricula) if archivo_matricula.name.endswith(".csv") else pd.read_excel(archivo_matricula)
             st.dataframe(df_alumnos, use_container_width=True)
             if st.button("📋 Confirmar y Guardar Matrícula"):
                 st.session_state["alumnos_df"] = df_alumnos
-                st.toast("Matrícula guardada", icon="✅")
+                sheet_id = st.session_state.get("sheet_id")
+                if sheet_id:
+                    guardar_datos_docente_drive(sheet_id, df_alumnos=df_alumnos)
+                st.toast("Matrícula guardada y respaldada en Google Drive", icon="✅")
 
     with tab3:
         st.header("3. Digitalización e Integración Drive/PDF")
         if "config_eval" not in st.session_state or "alumnos_df" not in st.session_state:
-            st.warning("⚠️ Completa los pasos 1 y 2 antes de procesar notas.")
+            st.warning("⚠️ Completa o sincroniza los pasos 1 y 2 antes de procesar notas.")
         else:
             doc_email = st.session_state.get("user_email", "profesor@universidad.edu.pe")
             st.info(f"📧 **Docente Registrado:** `{doc_email}`")
@@ -207,9 +327,8 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
                             prompt = f"Extrae las notas en formato JSON estricto según la estructura: {st.session_state['config_eval']['estructura'].to_string()}"
                             response = model.generate_content([prompt, {"mime_type": imagen_registro.type, "data": bytes_data}])
                             
-                            # Guardamos en estado
                             st.session_state["df_resultado"] = st.session_state["alumnos_df"].copy()
-                            st.success("Digitalización completada e integrada.")
+                            st.success("Digitalización completada e integrada correctamente.")
                         except Exception as e:
                             st.error(f"Error en procesamiento: {e}")
 
@@ -219,7 +338,7 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
                 st.download_button("📄 Descargar Comprobante PDF (Sello Digital)", pdf_bytes, f"Comprobante_{datetime.date.today()}.pdf", "application/pdf")
 
 # =============================================================================
-# MODO 2: ESTUDIANTE / SERVICIOS ACADÉMICOS (SUSCRIPCIÓN MENSUAL S/ 5.00)
+# MODO 2: ESTUDIANTE / SERVICIOS ACADÉMICOS
 # =============================================================================
 else:
     st.title("🎓 Ingenia Verde Academic - Servicios Estudiantiles")
@@ -340,7 +459,6 @@ else:
                         except Exception as e:
                             st.error(f"Error procesando la tabla: {e}")
 
-            # Renderizado y descarga persistente
             if "df_limpio" in st.session_state:
                 st.subheader("📋 Tabla Limpia Resultante:")
                 st.dataframe(st.session_state["df_limpio"], use_container_width=True)
