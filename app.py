@@ -7,24 +7,21 @@ import json
 from google import genai
 from PIL import Image
 
-# Tu clave de API predeterminada de Gemini
-API_KEY_PREDETERMINADA = "AQ.AB8NNGHT-53GflQdKC3V0bnAuNeUg_S2a16DTaoVSHWVXGNA"
+# ==========================================
+# CONFIGURACIÓN Y CLAVES
+# ==========================================
+CLAVE_DOCENTE = "Docente2025"  # Clave para ingresar al panel docente
+CLAVE_PRO = "Ingenia2025"       # Clave para ingresar a la versión PRO
 
-# Claves de acceso privadas
-CLAVE_DOCENTE = "Docente2025"  # Clave de acceso privada para docentes y para ti
-CLAVE_PRO = "Ingenia2025"       # Clave de acceso para la versión PRO
+# Obtener la API Key de forma segura si existe en los Secrets de Streamlit
+API_KEY_PREDETERMINADA = st.secrets.get("GEMINI_API_KEY", "")
 
 # Función auxiliar segura para extraer JSON de la respuesta de Gemini
 def limpiar_json(texto):
     texto = texto.strip()
-    if "```" in texto:
-        bloques = texto.split("```")
-        for b in bloques:
-            b = b.strip()
-            if b.startswith("json"):
-                b = b[4:].strip()
-            if b.startswith("{") or b.startswith("["):
-                return b
+    match = re.search(r'\{.*\}|\[.*\]', texto, re.DOTALL)
+    if match:
+        return match.group(0)
     return texto
 
 # Configuración inicial de la página
@@ -74,10 +71,22 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
             st.rerun()
 
         st.markdown("---")
+        
+        # Campo para la API Key de Gemini
+        st.write("🔑 **Configuración de IA**")
+        api_key_docente = st.text_input(
+            "Gemini API Key:", 
+            value=API_KEY_PREDETERMINADA, 
+            type="password", 
+            help="Ingresa tu clave de Google AI Studio si no está configurada",
+            key="api_key_docente_input"
+        )
+        
+        st.markdown("---")
         tab1, tab2, tab3 = st.tabs(["1️⃣ Cargar Sílabo", "2️⃣ Cargar Matrícula", "3️⃣ Digitalizar Registro (Foto/Video) a Excel"])
 
         # ---------------------------------------------------------
-        # TAB 1: BOTÓN 1 - ESTRUCTURAR SÍLABO
+        # TAB 1: ESTRUCTURAR SÍLABO
         # ---------------------------------------------------------
         with tab1:
             st.subheader("Botón 1: Estructurar Sílabo")
@@ -86,51 +95,54 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
             
             if silabo_file:
                 if st.button("Procesar Sílabo con IA"):
-                    with st.spinner("Analizando el documento con Gemini Visión..."):
-                        try:
-                            client = genai.Client(api_key=API_KEY_PREDETERMINADA)
-                            bytes_data = silabo_file.read()
-                            
-                            prompt = (
-                                "Analiza este sílabo universitario de la Facultad de Recursos Naturales Renovables. "
-                                "Extrae el nombre del curso, el sistema de evaluación (rubros/criterios con sus pesos) "
-                                "y la fórmula final para el promedio. "
-                                "Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:\n"
-                                "{\n"
-                                '  "curso": "Nombre del Curso",\n'
-                                '  "evaluaciones": [\n'
-                                '    {"criterio": "Examen Parcial", "peso_porcentaje": 30},\n'
-                                '    {"criterio": "Practicas de Campo", "peso_porcentaje": 20}\n'
-                                '  ],\n'
-                                '  "formula": "PF = (EP*0.30) + (PC*0.20)..."\n'
-                                "}"
-                            )
-                            
-                            part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
-                            response = client.models.generate_content(
-                                model="gemini-2.5-flash",
-                                contents=[part, prompt]
-                            )
-                            
-                            texto_clean = limpiar_json(response.text)
-                            datos_silabo = json.loads(texto_clean)
-                            st.session_state["datos_silabo"] = datos_silabo
-                            
-                            st.success(f"¡Sílabo procesado exitosamente: **{datos_silabo.get('curso', 'Curso Detectado')}**!")
-                            
-                            df_evals = pd.DataFrame(datos_silabo.get("evaluaciones", []))
-                            st.subheader("📊 Ponderaciones del Curso")
-                            st.dataframe(df_evals, use_container_width=True)
-                            st.info(f"📐 **Fórmula de Evaluación:** {datos_silabo.get('formula', 'No especificada')}")
-                            
-                        except Exception as e:
-                            st.error(f"Error al analizar el PDF del sílabo: {e}")
+                    if not api_key_docente:
+                        st.error("⚠️ Por favor ingresa tu Gemini API Key en el campo superior.")
+                    else:
+                        with st.spinner("Analizando el documento con Gemini Visión..."):
+                            try:
+                                client = genai.Client(api_key=api_key_docente)
+                                bytes_data = silabo_file.read()
+                                
+                                prompt = (
+                                    "Analiza este sílabo universitario de la Facultad de Recursos Naturales Renovables. "
+                                    "Extrae el nombre del curso, el sistema de evaluación (rubros/criterios con sus pesos) "
+                                    "y la fórmula final para el promedio. "
+                                    "Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:\n"
+                                    "{\n"
+                                    '  "curso": "Nombre del Curso",\n'
+                                    '  "evaluaciones": [\n'
+                                    '    {"criterio": "Examen Parcial", "peso_porcentaje": 30},\n'
+                                    '    {"criterio": "Practicas de Campo", "peso_porcentaje": 20}\n'
+                                    '  ],\n'
+                                    '  "formula": "PF = (EP*0.30) + (PC*0.20)..."\n'
+                                    "}"
+                                )
+                                
+                                part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
+                                response = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=[part, prompt]
+                                )
+                                
+                                texto_clean = limpiar_json(response.text)
+                                datos_silabo = json.loads(texto_clean)
+                                st.session_state["datos_silabo"] = datos_silabo
+                                
+                                st.success(f"¡Sílabo procesado exitosamente: **{datos_silabo.get('curso', 'Curso Detectado')}**!")
+                                
+                                df_evals = pd.DataFrame(datos_silabo.get("evaluaciones", []))
+                                st.subheader("📊 Ponderaciones del Curso")
+                                st.dataframe(df_evals, use_container_width=True)
+                                st.info(f"📐 **Fórmula de Evaluación:** {datos_silabo.get('formula', 'No especificada')}")
+                                
+                            except Exception as e:
+                                st.error(f"Error al analizar el PDF del sílabo: {e}")
 
             if "datos_silabo" in st.session_state:
                 st.caption("✅ Ponderaciones guardadas para el cálculo final.")
 
         # ---------------------------------------------------------
-        # TAB 2: BOTÓN 2 - CARGAR MATRÍCULA
+        # TAB 2: CARGAR MATRÍCULA
         # ---------------------------------------------------------
         with tab2:
             st.subheader("Botón 2: Cargar Matrícula y Alumnos")
@@ -152,31 +164,34 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
                                 st.dataframe(df_est, use_container_width=True)
                             
                             elif ext == "pdf":
-                                client = genai.Client(api_key=API_KEY_PREDETERMINADA)
-                                bytes_data = lista_file.read()
-                                prompt = (
-                                    "Extrae la lista completa de estudiantes matriculados de este PDF. "
-                                    "Devuelve ÚNICAMENTE un JSON válido con esta estructura:\n"
-                                    "{\n"
-                                    '  "estudiantes": [\n'
-                                    '    {"nro": 1, "codigo": "20230001", "nombres_apellidos": "Juan Perez"}\n'
-                                    "  ]\n"
-                                    "}"
-                                )
-                                part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
-                                response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
-                                    contents=[part, prompt]
-                                )
-                                
-                                texto_clean = limpiar_json(response.text)
-                                datos_est = json.loads(texto_clean)
-                                lista_est = datos_est.get("estudiantes", [])
-                                st.session_state["lista_estudiantes"] = lista_est
-                                
-                                df_est = pd.DataFrame(lista_est)
-                                st.success(f"¡Se extrajeron {len(df_est)} estudiantes mediante IA!")
-                                st.dataframe(df_est, use_container_width=True)
+                                if not api_key_docente:
+                                    st.error("⚠️ Por favor ingresa tu Gemini API Key para procesar PDFs con IA.")
+                                else:
+                                    client = genai.Client(api_key=api_key_docente)
+                                    bytes_data = lista_file.read()
+                                    prompt = (
+                                        "Extrae la lista completa de estudiantes matriculados de este PDF. "
+                                        "Devuelve ÚNICAMENTE un JSON válido con esta estructura:\n"
+                                        "{\n"
+                                        '  "estudiantes": [\n'
+                                        '    {"nro": 1, "codigo": "20230001", "nombres_apellidos": "Juan Perez"}\n'
+                                        "  ]\n"
+                                        "}"
+                                    )
+                                    part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
+                                    response = client.models.generate_content(
+                                        model="gemini-2.5-flash",
+                                        contents=[part, prompt]
+                                    )
+                                    
+                                    texto_clean = limpiar_json(response.text)
+                                    datos_est = json.loads(texto_clean)
+                                    lista_est = datos_est.get("estudiantes", [])
+                                    st.session_state["lista_estudiantes"] = lista_est
+                                    
+                                    df_est = pd.DataFrame(lista_est)
+                                    st.success(f"¡Se extrajeron {len(df_est)} estudiantes mediante IA!")
+                                    st.dataframe(df_est, use_container_width=True)
                         except Exception as e:
                             st.error(f"Error al procesar la lista de estudiantes: {e}")
 
@@ -185,7 +200,7 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
                 st.dataframe(pd.DataFrame(st.session_state["lista_estudiantes"]), use_container_width=True)
 
         # ---------------------------------------------------------
-        # TAB 3: BOTÓN 3 - FOTO/VIDEO A EXCEL
+        # TAB 3: FOTO/VIDEO A EXCEL
         # ---------------------------------------------------------
         with tab3:
             st.subheader("Botón 3: Digitalizar Registro Auxiliar (Foto / Video) a Excel")
@@ -199,67 +214,70 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
             
             if foto_registro:
                 if st.button("Digitalizar Notas con IA"):
-                    with st.spinner("Analizando registro y digitalizando notas con Gemini Visión..."):
-                        try:
-                            client = genai.Client(api_key=API_KEY_PREDETERMINADA)
-                            bytes_data = foto_registro.read()
-                            mime_type = "video/mp4" if foto_registro.name.endswith(".mp4") else "image/jpeg"
-                            
-                            contexto_silabo = ""
-                            if "datos_silabo" in st.session_state:
-                                contexto_silabo = f"Ponderaciones del curso: {json.dumps(st.session_state['datos_silabo'])}"
-                            
-                            prompt = (
-                                f"Analiza esta imagen/video de un registro auxiliar de notas. {contexto_silabo}\n"
-                                "Extrae la lista de alumnos con sus notas por cada criterio evaluado.\n"
-                                "Devuelve ÚNICAMENTE un JSON válido con esta estructura:\n"
-                                "{\n"
-                                '  "registro": [\n'
-                                '    {"alumno": "Nombre Alumno", "examen_parcial": 15, "practicas": 14, "promedio_final": 14.7}\n'
-                                "  ]\n"
-                                "}"
-                            )
-                            
-                            part = genai.types.Part.from_bytes(data=bytes_data, mime_type=mime_type)
-                            response = client.models.generate_content(
-                                model="gemini-2.5-flash",
-                                contents=[part, prompt]
-                            )
-                            
-                            texto_clean = limpiar_json(response.text)
-                            datos_registro = json.loads(texto_clean)
-                            df_notas = pd.DataFrame(datos_registro.get("registro", []))
-                            
-                            st.success("¡Notas digitalizadas correctamente!")
-                            st.subheader("📑 Cuadro Consolidado de Calificaciones")
-                            st.dataframe(df_notas, use_container_width=True)
-                            
-                            st.subheader("💾 Descargar Registro Oficial")
-                            col_n1, col_n2 = st.columns(2)
-                            
-                            with col_n1:
-                                csv_notas = df_notas.to_csv(index=False).encode("utf-8-sig")
-                                st.download_button(
-                                    label="Descargar Registro en CSV",
-                                    data=csv_notas,
-                                    file_name="registro_notas_rnr.csv",
-                                    mime="text/csv"
+                    if not api_key_docente:
+                        st.error("⚠️ Por favor ingresa tu Gemini API Key para digitalizar con IA.")
+                    else:
+                        with st.spinner("Analizando registro y digitalizando notas con Gemini Visión..."):
+                            try:
+                                client = genai.Client(api_key=api_key_docente)
+                                bytes_data = foto_registro.read()
+                                mime_type = "video/mp4" if foto_registro.name.endswith(".mp4") else "image/jpeg"
+                                
+                                contexto_silabo = ""
+                                if "datos_silabo" in st.session_state:
+                                    contexto_silabo = f"Ponderaciones del curso: {json.dumps(st.session_state['datos_silabo'])}"
+                                
+                                prompt = (
+                                    f"Analiza esta imagen/video de un registro auxiliar de notas. {contexto_silabo}\n"
+                                    "Extrae la lista de alumnos con sus notas por cada criterio evaluado.\n"
+                                    "Devuelve ÚNICAMENTE un JSON válido con esta estructura:\n"
+                                    "{\n"
+                                    '  "registro": [\n'
+                                    '    {"alumno": "Nombre Alumno", "examen_parcial": 15, "practicas": 14, "promedio_final": 14.7}\n'
+                                    "  ]\n"
+                                    "}"
                                 )
                                 
-                            with col_n2:
-                                output_n = io.BytesIO()
-                                with pd.ExcelWriter(output_n, engine="xlsxwriter") as writer:
-                                    df_notas.to_excel(writer, index=False, sheet_name="Notas_Oficiales")
-                                excel_notas = output_n.getvalue()
-                                st.download_button(
-                                    label="Descargar en Excel (.xlsx)",
-                                    data=excel_notas,
-                                    file_name="registro_notas_rnr.xlsx",
-                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                part = genai.types.Part.from_bytes(data=bytes_data, mime_type=mime_type)
+                                response = client.models.generate_content(
+                                    model="gemini-2.5-flash",
+                                    contents=[part, prompt]
                                 )
                                 
-                        except Exception as e:
-                            st.error(f"Error al digitalizar el registro: {e}")
+                                texto_clean = limpiar_json(response.text)
+                                datos_registro = json.loads(texto_clean)
+                                df_notas = pd.DataFrame(datos_registro.get("registro", []))
+                                
+                                st.success("¡Notas digitalizadas correctamente!")
+                                st.subheader("📑 Cuadro Consolidado de Calificaciones")
+                                st.dataframe(df_notas, use_container_width=True)
+                                
+                                st.subheader("💾 Descargar Registro Oficial")
+                                col_n1, col_n2 = st.columns(2)
+                                
+                                with col_n1:
+                                    csv_notas = df_notas.to_csv(index=False).encode("utf-8-sig")
+                                    st.download_button(
+                                        label="Descargar Registro en CSV",
+                                        data=csv_notas,
+                                        file_name="registro_notas_rnr.csv",
+                                        mime="text/csv"
+                                    )
+                                    
+                                with col_n2:
+                                    output_n = io.BytesIO()
+                                    with pd.ExcelWriter(output_n) as writer:
+                                        df_notas.to_excel(writer, index=False, sheet_name="Notas_Oficiales")
+                                    excel_notas = output_n.getvalue()
+                                    st.download_button(
+                                        label="Descargar en Excel (.xlsx)",
+                                        data=excel_notas,
+                                        file_name="registro_notas_rnr.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    )
+                                    
+                            except Exception as e:
+                                st.error(f"Error al digitalizar el registro: {e}")
 
 
 # ==========================================
@@ -327,19 +345,19 @@ elif modulo == "📊 Extractor & Limpiador SIG y R (Pro S/ 5.00)":
         st.title("🌿 Ingenia Verde: Limpiador & Extractor de Datos SIG & R")
         st.write("Sube tu archivo de Excel o la foto de una libreta/tabla de campo para procesarlo al instante.")
 
-        tab1, tab2 = st.tabs(["📁 Archivo Excel", "📷 Foto de Campo / Libreta"])
+        tab_ex1, tab_ex2 = st.tabs(["📁 Archivo Excel", "📷 Foto de Campo / Libreta"])
 
         df_final = None
 
-        with tab1:
+        with tab_ex1:
             archivo_excel = st.file_uploader("Elige tu archivo de Excel", type=["xlsx", "xls"], key="excel_uploader")
             if archivo_excel is not None:
                 df_original = pd.read_excel(archivo_excel)
                 df_final = procesar_dataframe(df_original)
 
-        with tab2:
+        with tab_ex2:
             st.write("**Extracción automática desde imagen**")
-            api_key = st.text_input("Gemini API Key:", value=API_KEY_PREDETERMINADA, type="password", help="Clave configurada por defecto.")
+            api_key_pro = st.text_input("Gemini API Key:", value=API_KEY_PREDETERMINADA, type="password", help="Ingresa tu clave de Google AI Studio")
             archivo_imagen = st.file_uploader("Sube una foto clara de tu libreta o tabla", type=["jpg", "jpeg", "png"], key="img_uploader")
 
             if archivo_imagen is not None:
@@ -347,12 +365,12 @@ elif modulo == "📊 Extractor & Limpiador SIG y R (Pro S/ 5.00)":
                 st.image(imagen, caption="Imagen cargada", width=400)
 
                 if st.button("📷 Extraer Tabla de la Foto"):
-                    if not api_key:
+                    if not api_key_pro:
                         st.error("Por favor ingresa tu API Key de Gemini para continuar.")
                     else:
                         with st.spinner("Analizando la imagen y procesando datos con IA..."):
                             try:
-                                client = genai.Client(api_key=api_key)
+                                client = genai.Client(api_key=api_key_pro)
                                 prompt = (
                                     "Extrae toda la información tabular de esta imagen. "
                                     "Devuelve ÚNICAMENTE un objeto JSON con una clave 'datos' "
@@ -403,7 +421,7 @@ elif modulo == "📊 Extractor & Limpiador SIG y R (Pro S/ 5.00)":
 
             with col_d2:
                 output = io.BytesIO()
-                with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                with pd.ExcelWriter(output) as writer:
                     df_final.to_excel(writer, index=False, sheet_name='Datos_Limpios')
                 excel_data = output.getvalue()
 
