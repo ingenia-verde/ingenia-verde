@@ -38,11 +38,54 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
     tab1, tab2, tab3 = st.tabs(["1️⃣ Cargar Sílabo", "2️⃣ Cargar Matrícula", "3️⃣ Foto/Video a Excel"])
 
     with tab1:
-        st.subheader("Subir Sílabo para crear ponderaciones")
-        silabo_file = st.file_uploader("Sube el sílabo en PDF o Word", type=["pdf", "docx"], key="silabo_uploader")
+        st.subheader("Botón 1: Estructurar Sílabo")
+        st.write("Sube el sílabo del curso (PDF) para extraer automáticamente las ponderaciones y fórmula de evaluación.")
+        silabo_file = st.file_uploader("Sube tu sílabo en PDF", type=["pdf"], key="silabo_uploader")
+        
         if silabo_file:
-            if st.button("Procesar Sílabo"):
-                st.info("Analizando ponderaciones del curso...")
+            if st.button("Procesar Sílabo con IA"):
+                with st.spinner("Analizando el documento con Gemini Visión..."):
+                    try:
+                        client = genai.Client(api_key=API_KEY_PREDETERMINADA)
+                        bytes_data = silabo_file.read()
+                        
+                        prompt = (
+                            "Analiza este sílabo universitario de la Facultad de Recursos Naturales Renovables. "
+                            "Extrae el nombre del curso, el sistema de evaluación (rubros/criterios con sus pesos) "
+                            "y la fórmula final para el promedio. "
+                            "Devuelve ÚNICAMENTE un JSON válido con esta estructura exacta:\n"
+                            "{\n"
+                            '  "curso": "Nombre del Curso",\n'
+                            '  "evaluaciones": [\n'
+                            '    {"criterio": "Examen Parcial", "peso_porcentaje": 30},\n'
+                            '    {"criterio": "Practicas de Campo", "peso_porcentaje": 20}\n'
+                            '  ],\n'
+                            '  "formula": "PF = (EP*0.30) + (PC*0.20)..."\n'
+                            "}"
+                        )
+                        
+                        part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=[part, prompt]
+                        )
+                        
+                        texto_resp = response.text.strip()
+                        if texto_resp.startswith("```json"): texto_resp = texto_resp[7:]
+                        if texto_resp.endswith("```"): texto_resp = texto_resp[:-3]
+                        
+                        datos_silabo = json.loads(texto_resp.strip())
+                        st.session_state["datos_silabo"] = datos_silabo
+                        
+                        st.success(f"¡Sílabo procesado exitosamente: **{datos_silabo.get('curso', 'Curso Detectado')}**!")
+                        
+                        df_evals = pd.DataFrame(datos_silabo.get("evaluaciones", []))
+                        st.subheader("📊 Ponderaciones del Curso")
+                        st.dataframe(df_evals, use_container_width=True)
+                        st.info(f"📐 **Fórmula de Evaluación:** {datos_silabo.get('formula', 'No especificada')}")
+                        
+                    except Exception as e:
+                        st.error(f"Error al analizar el PDF del sílabo: {e}")
 
     with tab2:
         st.subheader("Subir lista de alumnos matriculados")
