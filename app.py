@@ -24,25 +24,43 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# GESTIÓN DE CLAVE API (SECRETS O MANUAL)
+# GESTIÓN DE CLAVE API (SECRETS)
 # -----------------------------------------------------------------------------
 api_key = None
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
 else:
-    api_key = st.sidebar.text_input("🔑 Clave API de Gemini (Admin)", type="password")
+    api_key = st.sidebar.text_input("🔑 Clave API (Admin)", type="password")
 
 if api_key:
     genai.configure(api_key=api_key)
 
 # -----------------------------------------------------------------------------
-# BARRA LATERAL: SELECTOR DE ROL
+# BARRA LATERAL: LOGIN Y SELECTOR DE ROL
 # -----------------------------------------------------------------------------
 st.sidebar.title("🌿 Ingenia Verde")
 st.sidebar.markdown("---")
+
+# MÓDULO DE INICIO DE SESIÓN POR CORREO
+st.sidebar.subheader("🔐 Iniciar Sesión")
+correo_usuario = st.sidebar.text_input(
+    "📧 Tu Correo Electrónico:", 
+    value=st.session_state.get("user_email", ""),
+    placeholder="usuario@unheval.edu.pe"
+)
+
+if correo_usuario:
+    st.session_state["user_email"] = correo_usuario
+    st.sidebar.success(f"Sesión activa: {correo_usuario}")
+else:
+    st.sidebar.warning("⚠️ Ingresa tu correo para guardar tu progreso.")
+
+st.sidebar.markdown("---")
+
+# SELECTOR DE MODO
 modo_usuario = st.sidebar.radio(
     "Selecciona el modo de uso:",
-    ["👨‍🏫 Modo Maestro / Docente", "🎓 Modo Estudiante / Servicios Academicos"]
+    ["👨‍🏫 Modo Maestro / Docente", "🎓 Modo Estudiante / Servicios Académicos"]
 )
 st.sidebar.markdown("---")
 
@@ -61,7 +79,7 @@ def generar_comprobante_pdf(docente_email, curso_nombre, df_resultado):
 
     fecha_hora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     info_text = f"""
-    <b>Docente:</b> {docente_email}<br/>
+    <b>Docente Registrado:</b> {docente_email}<br/>
     <b>Asignatura:</b> {curso_nombre}<br/>
     <b>Fecha de Registro:</b> {fecha_hora}<br/>
     <b>Plataforma:</b> Ingenia Verde Pro
@@ -94,6 +112,9 @@ def generar_comprobante_pdf(docente_email, curso_nombre, df_resultado):
 if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
     st.title("🎓 Ingenia Verde Pro - Gestión Docente")
     st.caption("Digitalización de notas con IA y sincronización en Google Drive")
+
+    if not st.session_state.get("user_email"):
+        st.info("👈 **Paso 1:** Inicia sesión con tu correo en la barra lateral para continuar.")
 
     tab1, tab2, tab3 = st.tabs([
         "1️⃣ Configuración del Sílabo", 
@@ -137,12 +158,14 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
         if "config_eval" not in st.session_state or "alumnos_df" not in st.session_state:
             st.warning("⚠️ Completa los pasos 1 y 2 antes de procesar notas.")
         else:
-            docente_email = st.text_input("📧 Correo del Docente", "profesor@universidad.edu.pe")
+            doc_email = st.session_state.get("user_email", "profesor@universidad.edu.pe")
+            st.info(f"📧 **Docente Vinculado:** `{doc_email}`")
+            
             imagen_registro = st.file_uploader("Captura de registro manuscrito o impreso", type=["jpg", "jpeg", "png"])
             
             if imagen_registro and api_key:
                 if st.button("🚀 Procesar Notas con Gemini AI"):
-                    with st.spinner("Analizando registro físico..."):
+                    with st.spinner("Analizando registro físico con Inteligencia Artificial..."):
                         try:
                             bytes_data = imagen_registro.getvalue()
                             model = genai.GenerativeModel("gemini-1.5-flash")
@@ -157,7 +180,7 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
                             st.error(f"Error en procesamiento: {e}")
 
             if "df_resultado" in st.session_state:
-                pdf_bytes = generar_comprobante_pdf(docente_email, st.session_state["config_eval"]["curso"], st.session_state["df_resultado"])
+                pdf_bytes = generar_comprobante_pdf(doc_email, st.session_state["config_eval"]["curso"], st.session_state["df_resultado"])
                 st.download_button("📄 Descargar Comprobante PDF (Sello Digital)", pdf_bytes, f"Comprobante_{datetime.date.today()}.pdf", "application/pdf")
 
 # =============================================================================
@@ -166,6 +189,9 @@ if modo_usuario == "👨‍🏫 Modo Maestro / Docente":
 else:
     st.title("🎓 Ingenia Verde Academic - Servicios Estudiantiles")
     st.caption("Compilación de informes, análisis estadístico en R y procesamiento espacial en ArcGIS Pro")
+
+    if not st.session_state.get("user_email"):
+        st.info("👈 **Paso 1:** Inicia sesión con tu correo en la barra lateral para registrar tus pedidos.")
 
     tab_est1, tab_est2, tab_est3 = st.tabs([
         "📄 Compilación de Informes", 
@@ -178,14 +204,14 @@ else:
         col1, col2 = st.columns(2)
         with col1:
             estudiante_nombre = st.text_input("Nombre Completo del Estudiante")
-            carrera = st.text_input("Carrera / Facultad", "Ingeniería")
+            carrera = st.text_input("Carrera / Facultad", "Ingeniería en Recursos Naturales Renovables")
             asunto_informe = st.text_input("Título / Tema del Trabajo")
         with col2:
             estilo_formato = st.selectbox("Norma de Estilo / Formato", ["APA 7ma Edición", "IEEE", "ISO 690", "Libre / Universidad"])
             archivos_informe = st.file_uploader("Adjuntar borradores o datos (Word, PDF, Excel)", accept_multiple_files=True)
 
         if st.button("📩 Enviar Solicitud de Compilación"):
-            st.success("¡Solicitud recibida! Se procesará el formato estructurado del informe.")
+            st.success(f"¡Solicitud recibida! Se enviará la confirmación al correo: {st.session_state.get('user_email', 'no registrado')}")
 
     with tab_est2:
         st.header("Procesamiento Estadístico con R / RStudio")
@@ -207,4 +233,4 @@ else:
         archivos_gis = st.file_uploader("Subir comprimido (.zip) con el proyecto ArcGIS / Shapefiles", type=["zip"])
         instrucciones_gis = st.text_area("Detalles de Simbología y Coordenadas (UTM / WGS84)")
         if st.button("🗺️ Registrar Proyecto ArcGIS Pro"):
-            st.success("Proyecto registrado para procesamiento geospacial.")
+            st.success(f"Proyecto registrado para procesamiento geospacial asignado a: {st.session_state.get('user_email', 'no registrado')}")
