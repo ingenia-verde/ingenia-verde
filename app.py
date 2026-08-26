@@ -13,7 +13,7 @@ from PIL import Image
 CLAVE_DOCENTE = "Docente2025"  # Clave para ingresar al panel docente
 CLAVE_PRO = "Ingenia2025"       # Clave para ingresar a la versión PRO
 
-# Obtener la API Key de forma segura si existe en los Secrets de Streamlit
+# Obtener la API Key de forma segura desde los Secrets de Streamlit
 API_KEY_PREDETERMINADA = st.secrets.get("GEMINI_API_KEY", "")
 
 # Función auxiliar segura para extraer JSON de la respuesta de Gemini
