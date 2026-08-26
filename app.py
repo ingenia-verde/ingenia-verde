@@ -120,7 +120,7 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
                                 
                                 part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
                                 response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
+                                    model="gemini-3.6-flash",
                                     contents=[part, prompt]
                                 )
                                 
@@ -180,7 +180,7 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
                                     )
                                     part = genai.types.Part.from_bytes(data=bytes_data, mime_type="application/pdf")
                                     response = client.models.generate_content(
-                                        model="gemini-2.5-flash",
+                                        model="gemini-3.6-flash",
                                         contents=[part, prompt]
                                     )
                                     
@@ -240,7 +240,7 @@ if modulo == "👨‍🏫 Digitación de Notas - Maestros RNR (Gratis / Beta)":
                                 
                                 part = genai.types.Part.from_bytes(data=bytes_data, mime_type=mime_type)
                                 response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
+                                    model="gemini-3.6-flash",
                                     contents=[part, prompt]
                                 )
                                 
@@ -378,7 +378,7 @@ elif modulo == "📊 Extractor & Limpiador SIG y R (Pro S/ 5.00)":
                                     "Ejemplo: {\"datos\": [{\"punto\": 1, \"este\": 300557.8, \"norte\": 8897508.1}]}"
                                 )
                                 response = client.models.generate_content(
-                                    model="gemini-2.5-flash",
+                                    model="gemini-3.6-flash",
                                     contents=[imagen, prompt]
                                 )
                                 texto_clean = limpiar_json(response.text)
